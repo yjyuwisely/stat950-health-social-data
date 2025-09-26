@@ -1,0 +1,302 @@
+---
+title: "How Do Casual and Member Riders Differ?"
+author: "Yeongjin Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    css: bold-headings.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, 
+                      fig.width = 10, fig.height = 6, fig.align = "center")
+```
+
+# Section 1: Introduction
+
+This report investigates rider behaviour in New York City’s Citi Bike system by comparing usage patterns between casual and member riders. Using a sample of 50,000 trips, we examine ride durations, bike type preferences, and time-of-day usage to identify behavioural differences. Understanding these behavioural differences can help Citi Bike enhance service delivery, allocate resources effectively, and design targeted engagement strategies.
+
+The analysis is guided by three research questions:
+1. Do casual riders take longer trips than members?
+2. How does bike type usage differ between these two groups?
+3. Are there differences in ride durations by time of day across user types?
+
+To answer these questions, a random sample of 50,000 trips was drawn from the Citi Bike dataset. The key variables explored include:
+
+- **ride_duration**: a quantitative measure of how long each trip lasted (in minutes),
+- **bike_type**: a categorical variable indicating whether the bike was classic, electric, or docked,
+- **day_period**: a categorical variable indicating whether the ride occurred in the morning, afternoon, or night.
+
+This report uses descriptive statistics, data visualisation, and comparison techniques to uncover user patterns relevant to Citi Bike's operations.
+
+
+# Section 2: Data Cleaning
+
+The original dataset includes multiple bike duration columns and geographic identifiers that are not relevant to our research aims. The following steps were used to clean and reshape the data for analysis.
+
+```{r import-data}
+# Load libraries
+library(tidyverse)
+
+# Import data
+data <- read_csv("Citi-Bike-NYC.csv")
+
+# Preview the data
+head(data)
+```
+
+We removed location and timestamp variables that were not required for the current study.
+
+```{r}
+# Drop unnecessary columns
+data_clean <- data %>%
+  select(-c(started_at, ended_at, start_station_id, end_station_id,
+            start_lat, start_lng, end_lat, end_lng))
+```
+
+The dataset initially stores ride durations in separate columns for each bike type. We pivot these columns into long format, creating a single bike_type column and a single ride_duration column. This transformation ensures that each ride is represented by a single row, simplifying comparison across user types.
+
+```{r}
+# Pivot to long format and filter missing durations
+data_long <- data_clean %>%
+  pivot_longer(cols = c(classic_bike, electric_bike, docked_bike),
+               names_to = "bike_type",
+               values_to = "ride_duration") %>%
+  filter(!is.na(ride_duration))
+```
+
+We selected the relevant columns for the analysis and verified the structure.
+
+```{r}
+# Select final analysis variables
+data_final <- data_long %>%
+  select(member_casual, day_period, bike_type, ride_duration)
+
+# Preview cleaned data
+head(data_final)
+```
+
+A sample of 50,000 rows was taken using the last five digits of the student ID as the random seed to ensure reproducibility.
+
+```{r}
+# Sample 50,000 rows using student ID as seed
+set.seed(535543)
+bike_sample <- data_final %>% sample_n(50000)
+
+# Confirm sample size
+nrow(bike_sample)
+```
+This dataset (bike_sample) is used for all further analysis.
+
+
+# Section 3: Approximating the Distribution of Trip Durations 
+## Ride Duration Distribution
+
+To understand the shape of the ride duration distribution, we compare the actual distribution to simulated data from both a uniform and a normal distribution with matching parameters. This helps identify a suitable approximation method for ride duration.
+
+We first define a summary function.
+
+```{r summary-function}
+summary_stats <- function(x) {
+  tibble(
+    min = min(x),
+    max = max(x),
+    mean = mean(x),
+    sd = sd(x),
+    median = median(x),
+    IQR = IQR(x)
+  )
+}
+```
+
+We then summarise the ride durations in our sample.
+
+```{r}
+summary_stats(bike_sample$ride_duration)
+```
+
+Next, we simulate data from a uniform and normal distribution using the actual ride duration’s min/max and mean/sd respectively.
+
+```{r}
+# Simulate 50,000 ride durations
+uniform_sample <- runif(50000,
+                        min = min(bike_sample$ride_duration),
+                        max = max(bike_sample$ride_duration))
+
+normal_sample <- rnorm(50000,
+                       mean = mean(bike_sample$ride_duration),
+                       sd = sd(bike_sample$ride_duration))
+```
+
+We summarise the simulated distributions.
+
+```{r}
+summary_stats(uniform_sample)
+summary_stats(normal_sample)
+```
+
+Finally, we plot the three distributions side by side for comparison.
+
+```{r duration-distribution-compare, fig.cap = "Figure 1: Comparison of Actual, Uniform, and Normal Distributions of Ride Duration", fig.width=12, fig.height=5}
+
+par(mfrow = c(1, 3))  # Set up 3 side-by-side plots
+
+hist(bike_sample$ride_duration,
+     main = "Actual Ride Durations",
+     col = "lightblue",
+     xlab = "Minutes")
+
+hist(uniform_sample,
+     main = "Uniform Distribution",
+     col = "lightgreen",
+     xlab = "Minutes")
+
+hist(normal_sample,
+     main = "Normal Distribution",
+     col = "lightpink",
+     xlab = "Minutes")
+```
+
+The actual ride duration distribution is right-skewed with a high peak at short durations. The normal distribution approximates the centre better than the uniform distribution, which spreads values evenly. However, both simulated distributions fail to capture the skew and variability in the real data. Overall, the normal distribution provides a better—but still limited—approximation for ride durations.
+
+
+# Section 4: Citi-Bike User Behaviour
+
+This section compares key behaviours between casual and member riders using summary statistics, visualisations, and inferential tests.
+
+## Ride Duration by User Type
+
+We begin by comparing the ride durations of casual and member riders.
+
+```{r duration-boxplot, fig.cap = "Figure 2: Ride Duration by User Type", fig.width=8, fig.height=5}
+# Summary statistics by user type
+bike_sample %>%
+  group_by(member_casual) %>%
+  summarise(
+    Mean = round(mean(ride_duration), 2),
+    Median = round(median(ride_duration), 2),
+    SD = round(sd(ride_duration), 2),
+    Count = n()
+  )
+
+# Perform t-test
+t_test_result <- t.test(ride_duration ~ member_casual, data = bike_sample)
+t_test_result$p.value
+
+# Visualise ride duration
+ggplot(bike_sample, aes(x = member_casual, y = ride_duration)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(x = "User Type", y = "Ride Duration (minutes)") +
+  theme_minimal()
+```
+Casual riders take longer trips on average than members. The t-test result (p < 0.001) confirms this difference is statistically significant. The boxplot also shows greater variability among casual users.
+
+
+## Ride Duration Distribution by User Type
+
+```{r duration-distribution-user-type, fig.cap = "Figure 3: Ride Duration Distribution by User Type", fig.width=6, fig.height=4}
+ggplot(bike_sample, aes(x = ride_duration, fill = member_casual)) +
+  geom_histogram(position = "dodge", bins = 30) +
+  labs(x = "Ride Duration (Minutes)",
+       y = "Frequency",
+       fill = "User Type") +
+  theme_minimal()
+```
+Figure 3 presents the ride duration distribution by user type. Member rides are more concentrated in shorter durations, whereas casual rides are more spread out with a longer tail. This supports the earlier summary and confirms that casual riders tend to take longer trips.
+
+
+## Bike Type Preference
+Next, we examine which types of bikes each group tends to use.
+
+```{r bike-type-preference, fig.cap = "Figure 4: Bike Type Usage by User Type", fig.width=8, fig.height=5}
+# Fill missing combinations
+bike_type_summary <- bike_sample %>%
+  count(member_casual, bike_type) %>%
+  group_by(member_casual) %>%
+  mutate(Proportion = round(n / sum(n) * 100, 2)) %>%
+  ungroup() %>%
+  complete(member_casual, bike_type, fill = list(n = 0, Proportion = 0))
+
+# Plot with consistent bar widths
+ggplot(bike_type_summary, aes(x = member_casual, y = Proportion, fill = bike_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "User Type", y = "Percentage (%)", fill = "Bike Type") +
+  scale_fill_manual(
+    values = c("classic_bike" = "#E41A1C", "docked_bike" = "#4DAF4A", "electric_bike" = "#377EB8"),
+    labels = c("classic_bike" = "Classic Bike", 
+               "docked_bike" = "Docked Bike", 
+               "electric_bike" = "Electric Bike")
+  ) +
+  theme_minimal()
+```
+Both groups mostly use classic bikes. However, casual riders show more diversity, using docked and electric bikes more often than members.
+
+## Ride Duration by Day Period
+
+We now explore how trip lengths vary by time of day.
+
+```{r duration-by-period, fig.cap = "Figure 5: Average Ride Duration by Day Period and User Type", fig.width=8, fig.height=5}
+duration_by_period <- bike_sample %>%
+  group_by(member_casual, day_period) %>%
+  summarise(
+    Mean_Duration = round(mean(ride_duration), 2),
+    Count = n()
+  )
+
+duration_by_period
+
+# Reorder factor levels for day_period
+duration_by_period$day_period <- factor(duration_by_period$day_period,
+                                        levels = c("morning", "afternoon", "night"))
+
+# Plot with correct order
+ggplot(duration_by_period, aes(x = day_period, y = Mean_Duration, fill = member_casual)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Day Period", y = "Average Duration (minutes)", fill = "User Type") +
+  theme_minimal()
+```
+
+Casual riders take longer rides than members across all time periods. Afternoon rides tend to be the longest for both groups.
+
+
+# Section 5: Conclusion
+
+This analysis examined whether casual riders use Citi Bikes differently from members, using a random sample of 50,000 rides. It revealed significant differences between casual and member riders, most notably in ride duration and bike type preferences. Casual riders consistently take longer trips across all day periods and demonstrate more diversity in bike selection, using electric and docked bikes more frequently than members. Although the dataset includes start and end locations, including coordinates and station names, it does not explicitly record trip purposes. The observed patterns hint at potential differences in usage, but further spatial analysis would be necessary to draw definitive conclusions about underlying travel motivations. The statistically significant variations in ride characteristics highlight the potential for targeted marketing strategies and customised membership plans that could better serve each user group's unique needs.
+
+## Summary of Findings
+
+- **Ride Duration**: Casual riders take significantly longer trips than members.
+- **Bike Type**: Both rider types mostly use classic bikes, but casual users show greater diversity, using electric and docked bikes more often than members.
+- **Day Period Usage**: Casual riders ride for longer durations throughout the day, with a consistent pattern across morning, afternoon, and night periods.
+
+These findings are statistically supported and highlight consistent behavioural differences between the two rider types.
+
+## Implications
+
+These behavioural differences suggest that Citi Bike could:
+
+- Develop **targeted marketing** strategies to encourage casual riders to become members.
+- Offer **customised membership plans** that reflect different usage patterns.
+- Use usage data to optimise **bike type inventory and placement** across times and locations.
+
+These insights can guide service improvements such as **optimising bike placement** and **targeting promotions** to convert casual riders into long-term members.
+
+## Limitations
+
+- The analysis was limited to a single random sample of 50,000 rides.
+- Spatial and seasonal variation were not explored, although the dataset includes location and date variables.
+- The analysis used basic visual and statistical tools, and did not include predictive modelling.
+
+## Future Research Directions
+
+Future work could:
+
+- Investigate **spatial and seasonal patterns** in bike usage.
+- Explore **factors that influence membership conversion**.
+- Apply **machine learning models** to predict user behaviour and ride patterns.
+
+Overall, this study highlights the value of data-driven approaches in improving shared transport systems and enhancing user experience.
